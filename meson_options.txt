@@ -1,0 +1,2 @@
+option('rizin_plugdir', type: 'string', value: '', description: 'rizin plugin install directory')
+option('use_sys_z3', type: 'feature', value: 'disabled')
