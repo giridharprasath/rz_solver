@@ -1,8 +1,7 @@
 //
 // Created by z3phyr on 7/27/24.
 //
-#include <z3.h>
-#include <rz_core.h>
+#include "rz_solver_util.h"
 
 /**
    \brief Create a variable using the given name and type.

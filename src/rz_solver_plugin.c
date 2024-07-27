@@ -25,8 +25,15 @@ static const RzCmdDescHelp cmd_rop_solver_help = {
 };
 
 RZ_IPI RzCmdStatus rz_cmd_rop_solver_handler(RzCore *core, int argc, const char **argv, RzCmdStateOutput *state) {
-	const char *input = argc > 1 ? argv[1] : "";
-	return RZ_CMD_STATUS_OK;
+		RzList /*<RzRopConstraint *>*/ *constraints = rop_constraint_list_parse(core, argc, argv);
+		if (!constraints) {
+			return RZ_CMD_STATUS_ERROR;
+		}
+		if (rz_list_empty(constraints)) {
+			rz_list_free(constraints);
+			return RZ_CMD_STATUS_INVALID;
+		}
+		return rz_rop_solver(core, constraints);
 }
 
 RZ_IPI bool solver_plugin_init(RzCore *core) {
@@ -48,7 +55,7 @@ RZ_IPI bool solver_plugin_init(RzCore *core) {
 
 RZ_IPI bool solver_plugin_fini(RzCore *core) {
 	RzCmd *cmd = core->rcmd;
-	RzCmdDesc *desc = rz_cmd_get_desc(cmd, "solver");
+	RzCmdDesc *desc = rz_cmd_get_desc(cmd, "/Rs");
 	return rz_cmd_desc_remove(cmd, desc);
 }
 
