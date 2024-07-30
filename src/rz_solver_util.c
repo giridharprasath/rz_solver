@@ -6,61 +6,61 @@
 /**
    \brief Create a variable using the given name and type.
 */
-RZ_API Z3_ast mk_var(Z3_context ctx, const char *name, Z3_sort ty) {
-	Z3_symbol s = Z3_mk_string_symbol(ctx, name);
+RZ_API Z3_ast mk_var(const Z3_context ctx, const char *name, const Z3_sort ty) {
+	const Z3_symbol s = Z3_mk_string_symbol(ctx, name);
 	return Z3_mk_const(ctx, s, ty);
 }
 
 /**
    \brief Create a boolean variable using the given name.
 */
-RZ_API Z3_ast mk_bool_var(Z3_context ctx, const char *name) {
-	Z3_sort ty = Z3_mk_bool_sort(ctx);
+RZ_API Z3_ast mk_bool_var(const Z3_context ctx, const char *name) {
+	const Z3_sort ty = Z3_mk_bool_sort(ctx);
 	return mk_var(ctx, name, ty);
 }
 
 /**
    \brief Create an integer variable using the given name.
 */
-RZ_API Z3_ast mk_int_var(Z3_context ctx, const char *name) {
-	Z3_sort ty = Z3_mk_int_sort(ctx);
+RZ_API Z3_ast mk_int_var(const Z3_context ctx, const char *name) {
+	const Z3_sort ty = Z3_mk_int_sort(ctx);
 	return mk_var(ctx, name, ty);
 }
 
 /**
    \brief Create a Z3 integer node using a C int.
 */
-RZ_API Z3_ast mk_int(Z3_context ctx, int v) {
-	Z3_sort ty = Z3_mk_int_sort(ctx);
+RZ_API Z3_ast mk_int(const Z3_context ctx, const int v) {
+	const Z3_sort ty = Z3_mk_int_sort(ctx);
 	return Z3_mk_int(ctx, v, ty);
 }
 
 /**
    \brief Create a real variable using the given name.
 */
-Z3_ast mk_real_var(Z3_context ctx, const char *name) {
-	Z3_sort ty = Z3_mk_real_sort(ctx);
+Z3_ast mk_real_var(const Z3_context ctx, const char *name) {
+	const Z3_sort ty = Z3_mk_real_sort(ctx);
 	return mk_var(ctx, name, ty);
 }
 
 /**
    \brief Create the unary function application: <tt>(f x)</tt>.
 */
-static Z3_ast mk_unary_app(Z3_context ctx, Z3_func_decl f, Z3_ast x) {
-	Z3_ast args[1] = { x };
+static Z3_ast mk_unary_app(const Z3_context ctx, const Z3_func_decl f, const Z3_ast x) {
+	const Z3_ast args[1] = { x };
 	return Z3_mk_app(ctx, f, 1, args);
 }
 
 /**
    \brief Create the binary function application: <tt>(f x y)</tt>.
 */
-static Z3_ast mk_binary_app(Z3_context ctx, Z3_func_decl f, Z3_ast x, Z3_ast y) {
-	Z3_ast args[2] = { x, y };
+static Z3_ast mk_binary_app(const Z3_context ctx, const Z3_func_decl f, const Z3_ast x, const Z3_ast y) {
+	const Z3_ast args[2] = { x, y };
 	return Z3_mk_app(ctx, f, 2, args);
 }
 
-RZ_API Z3_solver mk_solver(Z3_context ctx) {
-	Z3_solver s = Z3_mk_solver(ctx);
+RZ_API Z3_solver mk_solver(const Z3_context ctx) {
+	const Z3_solver s = Z3_mk_solver(ctx);
 	Z3_solver_inc_ref(ctx, s);
 	return s;
 }
@@ -68,7 +68,7 @@ RZ_API Z3_solver mk_solver(Z3_context ctx) {
 /**
    \brief Display a symbol in the given output stream.
 */
-void display_symbol(Z3_context c, Z3_symbol s) {
+void display_symbol(const Z3_context c, const Z3_symbol s) {
 	switch (Z3_get_symbol_kind(c, s)) {
 	case Z3_INT_SYMBOL:
 		rz_cons_printf("#%d", Z3_get_symbol_int(c, s));
@@ -84,7 +84,7 @@ void display_symbol(Z3_context c, Z3_symbol s) {
 /**
    \brief Display the given type.
 */
-void display_sort(Z3_context c, Z3_sort ty) {
+void display_sort(const Z3_context c, const Z3_sort ty) {
 	switch (Z3_get_sort_kind(c, ty)) {
 	case Z3_UNINTERPRETED_SORT:
 		display_symbol(c, Z3_get_sort_name(c, ty));
@@ -139,7 +139,7 @@ void display_sort(Z3_context c, Z3_sort ty) {
    \brief Custom ast pretty printer.
    This function demonstrates how to use the API to navigate terms.
 */
-void display_ast(Z3_context c, Z3_ast v) {
+RZ_API void display_ast(const Z3_context c, const Z3_ast v) {
 	switch (Z3_get_ast_kind(c, v)) {
 	case Z3_NUMERAL_AST: {
 		Z3_sort t;
@@ -150,14 +150,13 @@ void display_ast(Z3_context c, Z3_ast v) {
 		break;
 	}
 	case Z3_APP_AST: {
-		unsigned i;
-		Z3_app app = Z3_to_app(c, v);
+		const Z3_app app = Z3_to_app(c, v);
 		unsigned num_fields = Z3_get_app_num_args(c, app);
 		Z3_func_decl d = Z3_get_app_decl(c, app);
 		rz_cons_printf("%s", Z3_func_decl_to_string(c, d));
 		if (num_fields > 0) {
 			rz_cons_printf("[");
-			for (i = 0; i < num_fields; i++) {
+			for (ut64 i = 0; i < num_fields; i++) {
 				if (i > 0) {
 					rz_cons_printf(", ");
 				}
@@ -179,20 +178,18 @@ void display_ast(Z3_context c, Z3_ast v) {
 /**
    \brief Custom function interpretations pretty printer.
 */
-void display_function_interpretations(Z3_context c, Z3_model m) {
-	unsigned num_functions, i;
+void display_function_interpretations(const Z3_context c, const Z3_model m) {
 
 	rz_cons_printf("function interpretations:\n");
 
-	num_functions = Z3_model_get_num_funcs(c, m);
-	for (i = 0; i < num_functions; i++) {
-		Z3_func_decl fdecl;
+	const ut64 num_functions = Z3_model_get_num_funcs(c, m);
+	for (ut64 i = 0; i < num_functions; i++) {
 		Z3_symbol name;
 		Z3_ast func_else;
 		unsigned num_entries = 0, j;
 		Z3_func_interp_opt finterp;
 
-		fdecl = Z3_model_get_func_decl(c, m, i);
+		const Z3_func_decl fdecl = Z3_model_get_func_decl(c, m, i);
 		finterp = Z3_model_get_func_interp(c, m, fdecl);
 		Z3_func_interp_inc_ref(c, finterp);
 		name = Z3_get_decl_name(c, fdecl);

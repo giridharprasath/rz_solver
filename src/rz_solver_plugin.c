@@ -25,12 +25,12 @@ static const RzCmdDescHelp cmd_rop_solver_help = {
 };
 
 RZ_IPI RzCmdStatus rz_cmd_rop_solver_handler(RzCore *core, int argc, const char **argv, RzCmdStateOutput *state) {
-		RzList /*<RzRopConstraint *>*/ *constraints = rop_constraint_list_parse(core, argc, argv);
+		RzPVector /*<RzRopConstraint *>*/ *constraints = rop_constraint_map_parse(core, argc, argv);
 		if (!constraints) {
 			return RZ_CMD_STATUS_ERROR;
 		}
-		if (rz_list_empty(constraints)) {
-			rz_list_free(constraints);
+		if (rz_pvector_empty(constraints)) {
+			rz_pvector_fini(constraints);
 			return RZ_CMD_STATUS_INVALID;
 		}
 		return rz_rop_solver(core, constraints);
