@@ -19,20 +19,24 @@ typedef struct {
     const RzRopGadgetInfo *gadget_info;
 } RopStackConstraintParams;
 
-static void update_rop_constraint_result(const RzRopSolverResult *result, const RzRopConstraint *constraint, ut64 address) {
+static void update_rop_constraint_result(const RzRopSolverResult *result, const RzRopConstraint *constraint,
+                                         const ut64 address) {
     rz_return_if_fail(result);
     rz_pvector_push(result->gadget_info_addr_set, (void *)address);
-    ht_pu_insert(result->constraint_result, constraint, 1);
+    if (ht_pu_insert(result->constraint_result, constraint, 1)) {
+        // An element should already be there.
+        rz_warn_if_reached();
+    }
 }
 
 static bool has_value(void *user, const void *key, const ut64 value) {
     RzRopSolverResult *result = user;
     if (!value) {
         result->is_solved = false;
-        return false;
+        return true; // Continue iteration rop solver is not complete
     }
     result->is_solved = true;
-    return true; // Continue iteration otherwise
+    return false;
 }
 
 static bool is_rop_solver_complete(const RzRopSolverResult *result) {
@@ -75,26 +79,69 @@ static void mov_reg(const RzCore *core, const RzRopGadgetInfo *gadget_info,
     return;
 }
 
-static void stack_constraint(const RopStackConstraintParams *params) {
+static bool stack_constraint(const RopStackConstraintParams *params, const RzRopSolverResult *result) {
+    rz_return_val_if_fail(params && params->constraint && params->reg_info, false);
     const RzCore *core = params->core;
-    rz_return_if_fail(core && core->analysis && core->analysis->reg);
+    rz_return_val_if_fail(core && core->analysis && core->analysis->reg, false);
+
+    bool status = false;
+    const RzRopGadgetInfo *gadget_info = params->gadget_info;
+    if (!gadget_info) {
+        return status;
+    }
     const char *sp = rz_reg_get_name(core->analysis->reg, RZ_REG_NAME_SP);
     if (!sp) {
-        return;
+        return status;
+    }
+    // Check if a pop or an equivalent operation on stack has been performed
+    if (gadget_info->stack_change <= core->analysis->bits / 8) {
+        return status;
+    }
+    RzListIter *iter;
+    RzRopRegInfo *reg_info;
+    bool is_stack_constraint = true;
+    rz_list_foreach (gadget_info->dependencies, iter, reg_info) {
+        if (RZ_STR_NE(reg_info->name, sp) && RZ_STR_NE(reg_info->name, params->reg_info->name)) {
+            is_stack_constraint = false;
+            break;
+        }
+    }
+
+    if (!is_stack_constraint) {
+        return status;
     }
     RzPVector /*<char *>*/ *query = rz_pvector_new(NULL);
-    rz_pvector_push(query, (void *)sp);
-    //RzPVector stack_query = rz_core_rop_get_reg_info_by_reg_names(params->gadget_info, query);
+    rz_pvector_push(query, (void *)params->reg_info->name);
+    RzPVector /*<RzRopRegInfo *>*/ *stack_query = rz_core_rop_get_reg_info_by_reg_names(gadget_info, query);
+    if (rz_pvector_empty(stack_query)) {
+        goto exit;
+    }
+    void **it;
+    rz_pvector_foreach (gadget_info->modified_registers, it) {
+        const RzRopRegInfo *reg_info_iter = *it;
+        if (!rz_pvector_contains(stack_query, reg_info_iter) && RZ_STR_NE(reg_info_iter->name, sp)) {
+            goto exit;
+        }
+    }
+    // This gadget has pop register with no dependencies
+        if (gadget_info->stack_change == core->analysis->bits / 8 * 2) {
+            update_rop_constraint_result(result, params->constraint, gadget_info->address);
+            status = true;
+        }
 
+    exit:
+    rz_pvector_fini(query);
+    rz_pvector_fini(stack_query);
+    return status;
 }
 
 static void mov_const(const RzCore *core, const RzRopGadgetInfo *gadget_info,
-                      const RzRopConstraint *rop_constraint, const RopSolverCallbackParams *params) {
+                      const RzRopConstraint *rop_constraint, const RopSolverCallbackParams *callback_params) {
     // Assertions for mov_const solver
     rz_return_if_fail(gadget_info && rop_constraint && rop_constraint->args);
     rz_return_if_fail(rop_constraint->args[SRC_CONST] && rop_constraint->args[DST_REG]);
     rz_return_if_fail(core && core->analysis && core->analysis->reg);
-    if (is_rop_solver_complete(params->result)) {
+    if (is_rop_solver_complete(callback_params->result)) {
         return;
     }
 
@@ -109,7 +156,7 @@ static void mov_const(const RzCore *core, const RzRopGadgetInfo *gadget_info,
         return;
     }
     if (info->new_val == src_val) {
-        update_rop_constraint_result(params->result, rop_constraint, gadget_info->address);
+        update_rop_constraint_result(callback_params->result, rop_constraint, gadget_info->address);
         return;
     }
 
@@ -119,9 +166,11 @@ static void mov_const(const RzCore *core, const RzRopGadgetInfo *gadget_info,
         .constraint = rop_constraint,
         .val = src_val,
         .reg_info = info,
-        .gadget_info = gadget_info
+        .gadget_info = gadget_info,
     };
-    stack_constraint(&stack_params);
+    if (stack_constraint(&stack_params, callback_params->result)) {
+        return;
+    }
 
     // Recipe : Search for dependencies and create a z3 state
 
@@ -163,6 +212,7 @@ static bool rop_solver_cb(void *user, const ut64 k, const void *v) {
     const RzCore *core = params->core;
     const RzPVector *constraints = params->constraints;
     const RzRopGadgetInfo *gadget_info = (RzRopGadgetInfo *)v;
+    // If rop solver is complete bail out from here
     if (is_rop_solver_complete(params->result)) {
         return false;
     }
@@ -178,9 +228,9 @@ static bool rop_solver_cb(void *user, const ut64 k, const void *v) {
     return true;
 }
 
-static RzRopSolverResult *setup_rop_solver_result(const RzPVector *constraints) {
+static RzRopSolverResult *setup_rop_solver_result(const RzPVector /*<RzRopConstraint *>*/ *constraints) {
     rz_return_val_if_fail(constraints, NULL);
-    RzRopSolverResult *result = RZ_NEW0(RzRopSolverResult);
+    RzRopSolverResult *result = rz_rop_solver_result_new();
     HtPUOptions opt = { 0 };
     result->constraint_result = ht_pu_new_opt(&opt);
     void **it;
@@ -248,6 +298,11 @@ RZ_API void rz_rop_solver_result_free(RzRopSolverResult *result) {
  * \param result The RzRopSolverResult object to print.
  */
 RZ_API void rz_rop_solver_result_print(const RzRopSolverResult *result) {
+    void **it;
+    rz_pvector_foreach(result->gadget_info_addr_set, it) {
+        const ut64 addr = (ut64)*it;
+        rz_cons_printf("ROP Gadget found at address: 0x%llx\n", addr);
+    }
     rz_return_if_fail(result);
 
 }

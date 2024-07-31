@@ -50,3 +50,26 @@ rz_silhouette_lib = shared_library('rz_solver', rz_solver_src,
                                    install_dir: rizin_plugdir,
                                    include_directories: include_directories(rz_solver_incs)
 )
+
+# Option to build tests
+build_tests = get_option('build_tests')
+
+if build_tests
+    # Add test sources
+    test_src = [
+        'tests'/'test_rop_solver.c',
+        # Add more test files here if needed
+    ]
+
+    # Create test binaries
+    test_bin_dir = 'tests/bin'
+
+    test_exe = executable('test_rop_solver', test_src,
+                          c_args : [],
+                          dependencies: rz_solver_deps,
+                          include_directories: include_directories(rz_solver_incs),
+                          install: true,
+                          install_dir: test_bin_dir)
+
+    test('run test_rop_solver', test_exe)
+endif
