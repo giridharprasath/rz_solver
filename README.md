@@ -1,1 +1,1 @@
-# rz_solver
+# rz-solver
