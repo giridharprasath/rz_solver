@@ -1,7 +1,7 @@
-# rz_solver
+# rz-solver
 
 ## Overview
-`rz_solver` is a Rizin plugin that provides a simple interface to an SMT solver, currently supporting ROP (Return-Oriented Programming) constraint solving using RzIL APIs.
+`rz-solver` is a Rizin plugin that provides a simple interface to an SMT solver, currently supporting ROP (Return-Oriented Programming) constraint solving using RzIL APIs.
 
 ## Installation
 
