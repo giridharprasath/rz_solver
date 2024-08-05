@@ -1,18 +1,20 @@
 // SPDX-FileCopyrightText: 2024 RizinOrg <info@rizin.re>
 // SPDX-FileCopyrightText: 2024 z3phyr <giridh1337@gmail.com>
-// SPDX-License-Identifier: LGPL-3.0-only
+// SPDX-License-Identifier: MIT
 
 #ifndef RZ_SOLVER_LIBRARY_H
 #define RZ_SOLVER_LIBRARY_H
 
 #include <rz_cmd.h>
 #include <rz_core.h>
-#include <rz_rop.h>
+#include <z3.h>
 
 typedef struct rz_rop_solver_result_t {
   HtPU *constraint_result;
   RzPVector /*<ut64>*/ *gadget_info_addr_set;
   bool is_solved;
+  Z3_context ctx;
+  Z3_solver solver;
 } RzRopSolverResult;
 
 RZ_API RzCmdStatus rz_rop_solver(

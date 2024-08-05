@@ -7,6 +7,8 @@
  * Adds core plugin to Rizin
  */
 
+#include <rz_rop.h>
+
 #include "rz_solver.h"
 
 static const RzCmdDescArg cmd_rop_solver_args[] = {
@@ -90,7 +92,6 @@ RzCorePlugin rz_core_plugin_solver = {
     .license = "MIT",
     .init = solver_plugin_init,
     .fini = solver_plugin_fini,
-    //.analysis = solver_plugin_analysis,
 };
 
 #ifdef _MSC_VER

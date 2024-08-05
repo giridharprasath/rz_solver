@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # Note: Lifted from rizin project
 # SPDX-FileCopyrightText: 2021 Anton Kochkov <anton.kochkov@gmail.com>
-# SPDX-License-Identifier: LGPL-3.0-only
+# SPDX-License-Identifier: MIT
 
 import argparse
 import glob

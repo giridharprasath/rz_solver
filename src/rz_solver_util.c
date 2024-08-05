@@ -93,7 +93,7 @@ RZ_API Z3_ast mk_binary_app(const Z3_context ctx, const Z3_func_decl func,
  * \param ctx Z3 context
  * \return Z3_solver
  */
-RZ_API Z3_solver mk_solver(const Z3_context ctx) {
+RZ_API Z3_solver rz_solver_mk_solver(const Z3_context ctx) {
   const Z3_solver s = Z3_mk_solver(ctx);
   Z3_solver_inc_ref(ctx, s);
   return s;
@@ -324,7 +324,18 @@ RZ_API void check2(const Z3_context ctx, const Z3_solver solver,
  * \return void
  */
 RZ_API void del_solver(const Z3_context ctx, const Z3_solver solver) {
+  rz_return_if_fail(ctx && solver);
   Z3_solver_dec_ref(ctx, solver);
+}
+
+/**
+ * \brief Delete a context
+ * \param ctx Z3 context
+ * \return void
+ */
+RZ_API void del_context(const Z3_context ctx) {
+  rz_return_if_fail(ctx);
+  Z3_del_context(ctx);
 }
 
 static void error_handler(Z3_context c, Z3_error_code e) {
@@ -333,7 +344,7 @@ static void error_handler(Z3_context c, Z3_error_code e) {
 
 static Z3_context mk_context_custom(const Z3_config cfg,
                                     const Z3_error_handler err) {
-  Z3_set_param_value(cfg, "rz_model", "true");
+  Z3_set_param_value(cfg, "model", "true");
   const Z3_context ctx = Z3_mk_context(cfg);
   if (!ctx) {
     return NULL;
@@ -343,7 +354,11 @@ static Z3_context mk_context_custom(const Z3_config cfg,
   return ctx;
 }
 
-RZ_API Z3_context mk_context() {
+/**
+ * \brief Create z3 context
+ * \return Z3 context
+ */
+RZ_API Z3_context rz_solver_mk_context() {
   const Z3_config cfg = Z3_mk_config();
   if (!cfg) {
     return NULL;
