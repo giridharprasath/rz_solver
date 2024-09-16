@@ -21,7 +21,6 @@ skiplist = [
 
 patterns = ["*.c", "*.cpp", "*.h", "*.hpp", "*.inc"]
 
-
 def should_scan(filename):
     return any(directory in filename for directory in dirlist) and any(
         pattern[1:] in filename for pattern in patterns

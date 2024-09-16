@@ -26,9 +26,7 @@ rz_solver_deps = [
     z3_dep,
 ]
 
-rz_solver_incs = [
-    'src',
-]
+rz_solver_incs = ['.', 'src']
 
 rz_solver_src = [
     'src'/'rz_solver.c',
@@ -41,7 +39,7 @@ if rizin_plugdir == ''
     rizin_plugdir = rz_core_dep.get_variable(pkgconfig: 'plugindir', cmake: 'rz_core_PLUGINDIR')
 endif
 
-rz_silhouette_lib = shared_library('rz_solver', rz_solver_src,
+rz_solver_lib = shared_library('rz_solver', rz_solver_src,
                                    c_args : [],
                                    dependencies: rz_solver_deps,
                                    implicit_include_directories: false,
@@ -49,3 +47,5 @@ rz_silhouette_lib = shared_library('rz_solver', rz_solver_src,
                                    install_dir: rizin_plugdir,
                                    include_directories: include_directories(rz_solver_incs)
 )
+
+subdir('tests')
