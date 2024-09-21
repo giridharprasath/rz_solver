@@ -3,7 +3,7 @@ project('z3', 'cpp', version: '3049f578a8f98a0b0992eca193afe57a73b30ca3')
 python = import('python').find_installation()
 
 # Run Z3's configuration script
-run_command(python, 'scripts/mk_make.py', '--python', check: true)
+run_command(python, 'scripts/mk_make.py', check: true)
 
 z3_src = [
     'src/ackermannization/lackr.cpp',
