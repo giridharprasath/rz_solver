@@ -17,8 +17,9 @@ typedef struct rz_rop_solver_result_t {
   Z3_solver solver;
 } RzRopSolverResult;
 
-RZ_API RzCmdStatus rz_rop_solver(
-    const RzCore *core, RzPVector /*<RzRopConstraint *>*/ *constraints);
+RZ_API RzRopSolverResult *
+rz_rop_solver(const RzCore *core,
+              RzPVector /*<RzRopConstraint *>*/ *constraints);
 
 // RzRopSolverResult APIs
 RZ_API RzRopSolverResult *rz_rop_solver_result_new(void);

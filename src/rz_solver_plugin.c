@@ -47,7 +47,12 @@ RZ_IPI RzCmdStatus rz_cmd_rop_solver_handler(RzCore *core, int argc,
     rz_pvector_fini(constraints);
     return RZ_CMD_STATUS_INVALID;
   }
-  return rz_rop_solver(core, constraints);
+  RzRopSolverResult *result = rz_rop_solver(core, constraints);
+  rz_rop_solver_result_print(result);
+
+  rz_rop_solver_result_free(result);
+
+  return RZ_CMD_STATUS_OK;
 }
 
 /**

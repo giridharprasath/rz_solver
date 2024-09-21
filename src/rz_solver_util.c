@@ -18,10 +18,9 @@ RZ_API Z3_ast mk_var(const Z3_context ctx, const char *name,
 }
 
 /**
- * \brie/home/z3phyr/personal/rizin-dev/rizinf Create a boolean variable with a given name.
- * \param ctx Z3 context
- * \param name Name of the variable
- * \return Z3_ast
+ * \brie/home/z3phyr/personal/rizin-dev/rizinf Create a boolean variable with a
+ * given name. \param ctx Z3 context \param name Name of the variable \return
+ * Z3_ast
  */
 RZ_API Z3_ast mk_bool_var(const Z3_context ctx, const char *name) {
   const Z3_sort ty = Z3_mk_bool_sort(ctx);
