@@ -10,6 +10,11 @@ py3_exe = import('python').find_installation()
 check_meson_subproject_py = files('sys/check_meson_subproject.py')
 subproject_clean_error_msg = 'Subprojects are not updated. Please run `git clean -dxff subprojects/` to delete all local subprojects directories.'
 
+r = run_command(py3_exe, check_meson_subproject_py, 'z3', check: false)
+if r.returncode() == 1
+    error(subproject_clean_error_msg)
+endif
+
 # handle z3 library
 sys_z3_opt = get_option('use_sys_z3')
 z3_dep = disabler()
