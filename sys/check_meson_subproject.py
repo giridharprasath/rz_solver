@@ -15,7 +15,7 @@ import os
 import sys
 
 subproject = sys.argv[1]
-meson_root = os.environ["MESON_SOURCE_ROOT"]
+meson_root = sys.argv[2] if len(sys.argv) > 2 else ''
 
 subproject_filename = os.path.join(meson_root, "subprojects", subproject + ".wrap")
 
@@ -66,8 +66,14 @@ try:
                     subproject_p_f = subproject_f.replace(
                         patch_subproject_dir, subproject_dir
                     )
+
                     if not os.path.isfile(subproject_f):
                         sys.exit(2)
+
+                    if not os.path.isfile(subproject_p_f):
+                        with open(subproject_f, 'rb') as fsrc:
+                            with open(subproject_p_f, 'wb') as fdst:
+                                fdst.write(fsrc.read())
 
                     if not filecmp.cmp(subproject_p_f, subproject_f):
                         sys.exit(3)
