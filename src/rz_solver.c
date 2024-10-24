@@ -14,7 +14,7 @@
  */
 
 typedef struct {
-  const RzCore *core;
+  RzCore *core;
   const RzPVector *constraints;
   RzRopSolverResult *result;
 } RopSolverCallbackParams;
@@ -28,17 +28,21 @@ typedef struct {
 } RopStackConstraintParams;
 
 typedef struct {
-  const RzCore *core;
+  ut64 analysis_level;
+  RzCore *core;
   const RzRopConstraint *constraint;
-  const RzRopGadgetInfo *gadget_info;
+  RzRopGadgetInfo *gadget_info;
   RzRopSolverResult *result;
 } RopSolverAnalysisOpParams;
+
+static void handle_analysis(RopSolverAnalysisOpParams *op_params);
 
 static void update_rop_constraint_result(const RzRopSolverResult *result,
                                          const RzRopConstraint *constraint,
                                          const ut64 address) {
   rz_return_if_fail(result);
   rz_pvector_push(result->gadget_info_addr_set, (void *)address);
+  rz_pvector_empty(result->rop_expressions);
   if (!ht_pu_update(result->constraint_result, constraint, 1)) {
     rz_warn_if_reached();
   }
@@ -62,6 +66,199 @@ static ut64 parse_rop_constraint_int_val(const RzRopConstraint *rop_constraint,
   return src_val;
 }
 
+static int add_gadget_to_graph(RzRopGraph *g, RzRopGadgetNode *gadget_node) {
+  if (g->num_vertices >= MAX_GADGETS) {
+    return -1;
+  }
+
+  int index = g->num_vertices;
+  g->gadgets[index] = *gadget_node;
+  g->num_vertices++;
+
+  // Update dependencies with existing gadgets
+  for (int i = 0; i < g->num_vertices - 1; i++) {
+    // Check if the new gadget writes to registers read by existing gadgets
+    for (int w = 0; w < gadget_node->writes_count; w++) {
+      for (int r = 0; r < g->gadgets[i].reads_count; r++) {
+        if (strcmp(gadget_node->writes[w], g->gadgets[i].reads[r]) == 0) {
+          // Add edge from new gadget to existing gadget (index -> i)
+          g->adj[index][i] = 1;
+        }
+      }
+    }
+
+    // Check if existing gadgets write to registers read by the new gadget
+    for (int w = 0; w < g->gadgets[i].writes_count; w++) {
+      for (int r = 0; r < gadget_node->reads_count; r++) {
+        if (strcmp(g->gadgets[i].writes[w], gadget_node->reads[r]) == 0) {
+          // Add edge from existing gadget to new gadget (i -> index)
+          g->adj[i][index] = 1;
+        }
+      }
+    }
+  }
+
+  return index;
+}
+
+static RzRopGraph *init_rz_rop_graph() {
+  RzRopGraph *g = RZ_NEW0(RzRopGraph);
+  if (!g) {
+    return NULL;
+  }
+
+  g->num_vertices = 0;
+  memset(g->adj, 0, sizeof(g->adj));
+  memset(g->gadgets, 0, sizeof(g->gadgets));
+  return g;
+}
+
+// Add a directed edge from u to v (u -> v)
+void add_edge(RzRopGraph *g, int u, int v) {
+  if (u >= 0 && u < g->num_vertices && v >= 0 && v < g->num_vertices) {
+    g->adj[u][v] = 1;
+  }
+}
+
+bool topological_sort(RzRopGraph *g, int sorted_order[]) {
+  int in_degree[MAX_GADGETS] = {0};
+  int num_vertices = g->num_vertices;
+
+  // Calculate in-degrees of all vertices
+  for (int i = 0; i < num_vertices; i++) {
+    for (int j = 0; j < num_vertices; j++) {
+      if (g->adj[j][i]) {
+        in_degree[i]++;
+      }
+    }
+  }
+
+  int queue[MAX_GADGETS], front = 0, rear = -1;
+  int index = 0; // Index for sorted_order
+
+  // Enqueue all vertices with in-degree 0
+  for (int i = 0; i < num_vertices; i++) {
+    if (in_degree[i] == 0) {
+      queue[++rear] = i;
+    }
+  }
+
+  // Perform the sorting
+  while (front <= rear) {
+    int v = queue[front++];
+    sorted_order[index++] = v;
+
+    for (int i = 0; i < num_vertices; i++) {
+      if (g->adj[v][i]) {
+        in_degree[i]--;
+        if (in_degree[i] == 0) {
+          queue[++rear] = i;
+        }
+      }
+    }
+  }
+
+  if (index != num_vertices) {
+    // Graph has a cycle; topological sort not possible
+    return false;
+  }
+
+  return true;
+}
+
+static ut8 *update_analysis_cache(RzCore *core, RzRopGadgetInfo *gadget_info) {
+  rz_return_val_if_fail(core && core->analysis, false);
+  // rop_gadget_info->size - 1 neglecting the ret instruction.
+
+  ut64 size = gadget_info->size - 1;
+  ut8 *buf = RZ_NEWS0(ut8, size);
+  if (!buf) {
+    return NULL;
+  }
+  if (rz_io_nread_at(core->io, gadget_info->address, buf, size) < 0) {
+    free(buf);
+    return NULL;
+  }
+  RzIterator *iter =
+      rz_core_analysis_bytes(core, gadget_info->address, buf, size, 0);
+  if (!iter) {
+    free(buf);
+    return NULL;
+  }
+  gadget_info->analysis_cache = iter;
+  return buf;
+}
+
+void handle_analysis(RopSolverAnalysisOpParams *op_params);
+
+static RzRopGadgetNode *fill_gadget_analysis(RzRopConstraint *constraint) {
+  RzRopGadgetNode *gadget_node = RZ_NEW0(RzRopGadgetNode);
+  if (!gadget_node) {
+    return NULL;
+  }
+
+  switch (constraint->type) {
+  case MOV_CONST: {
+    // reg <- const (SRC_CONST -> DST_REG)
+    strcpy(gadget_node->writes[gadget_node->writes_count++],
+           constraint->args[DST_REG]);
+    break;
+  }
+  case MOV_REG: {
+    strcpy(gadget_node->writes[gadget_node->writes_count++],
+           constraint->args[DST_REG]);
+    strcpy(gadget_node->reads[gadget_node->reads_count++],
+           constraint->args[SRC_REG]);
+    break;
+  }
+  case MOV_OP_CONST: {
+    // reg <- reg OP const (SRC_REG -> DST_REG with operation and constant)
+    strcpy(gadget_node->writes[gadget_node->writes_count++],
+           constraint->args[DST_REG]);
+    strcpy(gadget_node->reads[gadget_node->reads_count++],
+           constraint->args[SRC_REG]);
+    break;
+  }
+  case MOV_OP_REG: {
+    // reg <- reg OP reg (SRC_REG -> DST_REG with operation and another reg)
+    strcpy(gadget_node->writes[gadget_node->writes_count++],
+           constraint->args[DST_REG]);
+    strcpy(gadget_node->reads[gadget_node->reads_count++],
+           constraint->args[SRC_REG]);
+    strcpy(gadget_node->reads[gadget_node->reads_count++],
+           constraint->args[SRC_REG_SECOND]);
+    break;
+  }
+  default:
+    break;
+  }
+  return gadget_node;
+}
+
+static void construct_gadgets(RopSolverAnalysisOpParams *op_params,
+                              RzRopExpression *expr) {
+  if (!expr) {
+    return;
+  }
+
+  RzRopSolverResult *result = op_params->result;
+  if (!rz_pvector_contains(result->rop_expressions, expr)) {
+    rz_pvector_push(result->rop_expressions, expr);
+    RzRopGadgetNode *gadget_node = fill_gadget_analysis(expr);
+    if (!gadget_node) {
+      return;
+    }
+    add_gadget_to_graph(result->graph, gadget_node);
+    int sorted_order[MAX_GADGETS];
+    topological_sort(result->graph, sorted_order);
+    return;
+  }
+  void **it;
+  rz_pvector_foreach(result->rop_expressions, it) {
+    handle_analysis(op_params);
+  }
+}
+
 // Update this
 static inline bool is_pure_op(const RzAnalysisOp *op) {
   const _RzAnalysisOpType type = (op->type & RZ_ANALYSIS_OP_TYPE_MASK);
@@ -73,115 +270,108 @@ static inline bool is_pure_op(const RzAnalysisOp *op) {
          type == RZ_ANALYSIS_OP_TYPE_SAR;
 }
 
-static inline bool is_leaf_op(const RzAnalysisOp *op) {
-  return (op->type & RZ_ANALYSIS_OP_TYPE_MASK) == RZ_ANALYSIS_OP_TYPE_ILL ||
-         (op->type & RZ_ANALYSIS_OP_TYPE_MASK) == RZ_ANALYSIS_OP_TYPE_RET ||
-         (op->type & RZ_ANALYSIS_OP_TYPE_MASK) == RZ_ANALYSIS_OP_TYPE_UNK;
-}
-
-static inline bool is_call(const RzAnalysisOp *op) {
-  const _RzAnalysisOpType type = (op->type & RZ_ANALYSIS_OP_TYPE_MASK);
-  return type == RZ_ANALYSIS_OP_TYPE_CALL ||
-         type == RZ_ANALYSIS_OP_TYPE_UCALL ||
-         type == RZ_ANALYSIS_OP_TYPE_RCALL ||
-         type == RZ_ANALYSIS_OP_TYPE_ICALL ||
-         type == RZ_ANALYSIS_OP_TYPE_IRCALL ||
-         type == RZ_ANALYSIS_OP_TYPE_CCALL ||
-         type == RZ_ANALYSIS_OP_TYPE_UCCALL;
-}
-
-static bool is_uncond_jump(const RzAnalysisOp *op) {
-  return (op->type & RZ_ANALYSIS_OP_TYPE_MASK) == RZ_ANALYSIS_OP_TYPE_JMP &&
-         !((op->type & RZ_ANALYSIS_OP_HINT_MASK) & RZ_ANALYSIS_OP_TYPE_COND);
-}
-
-static bool is_return(const RzAnalysisOp *op) {
-  return (op->type & RZ_ANALYSIS_OP_TYPE_MASK) == RZ_ANALYSIS_OP_TYPE_RET;
-}
-
-static bool is_cond(const RzAnalysisOp *op) {
-  return (op->type & RZ_ANALYSIS_OP_HINT_MASK) == RZ_ANALYSIS_OP_TYPE_COND;
-}
-
-static bool is_mov(const RzAnalysisOp *op) {
-  const _RzAnalysisOpType type = (op->type & RZ_ANALYSIS_OP_TYPE_MASK);
-  return type == RZ_ANALYSIS_OP_TYPE_MOV || type == RZ_ANALYSIS_OP_TYPE_CMOV;
-}
-
-static void handle_mov_reg_analysis(const RopSolverAnalysisOpParams *op_params,
-                                    const void *v) {
+static void
+handle_mov_reg_analysis(const RopSolverAnalysisOpParams *op_params) {
   rz_return_if_fail(op_params && op_params->constraint &&
-                    op_params->gadget_info && v);
-  const RzAnalysisOp *op = (RzAnalysisOp *)v;
+                    op_params->gadget_info);
   const RzRopConstraint *constraint = op_params->constraint;
   const char *dst_reg = constraint->args[DST_REG];
   if (!dst_reg) {
     return;
   }
-
   const RzRopGadgetInfo *gadget_info = op_params->gadget_info;
 }
 
-static void
-handle_mov_const_analysis(const RopSolverAnalysisOpParams *op_params,
-                          const void *v) {
+static void handle_mov_const_analysis(RopSolverAnalysisOpParams *op_params) {
   rz_return_if_fail(op_params && op_params->constraint && op_params &&
-                    op_params->result && v && op_params->core);
+                    op_params->result && op_params->core);
   const RzRopConstraint *constraint = op_params->constraint;
-  const char *dst_reg = constraint->args[DST_REG];
-  if (!dst_reg) {
-    return;
-  }
-  const ut64 src_const = parse_rop_constraint_int_val(constraint, SRC_CONST);
-  const RzAnalysisOp *op = (RzAnalysisOp *)v;
-  const RzAnalysisValue *dst_val = op->dst;
-  if (!dst_val) {
-    return;
-  }
-
-  RzRegItem *dst_val_reg = dst_val->reg;
-  if (!dst_val_reg) {
-    return;
-  }
-  const RzCore *core = op_params->core;
-  if (dst_val_reg->size != core->analysis->bits &&
-      dst_val_reg->size != core->analysis->bits / 2) {
-    return;
-  }
-
-  RzRopSolverResult *result = op_params->result;
   const RzRopGadgetInfo *gadget_info = op_params->gadget_info;
   if (!gadget_info) {
     return;
   }
-  RzRopRegInfo *reg_info =
-      rz_core_rop_gadget_info_get_modified_register(gadget_info, dst_reg);
-  if (op->type) {
+
+  const char *dst_reg = constraint->args[DST_REG];
+  if (!dst_reg) {
+    return;
+  }
+
+  const ut64 src_const = parse_rop_constraint_int_val(constraint, SRC_CONST);
+  RzIterator *iter = gadget_info->analysis_cache;
+  RzAnalysisBytes *ab = rz_iterator_next(iter);
+  while (ab) {
+    const RzAnalysisOp *op = ab->op;
+    RzRopExpression *rop_expr =
+        rop_constraint_parse_args(op_params->core, ab->pseudo);
+    if (!rop_expr) {
+      break;
+    }
+    construct_gadgets(op_params, rop_expr);
+
+    const RzAnalysisValue *dst_val = op->dst;
+    if (!dst_val) {
+      break;
+    }
+
+    RzRegItem *dst_val_reg = dst_val->reg;
+    if (!dst_val_reg) {
+      break;
+    }
+    const RzCore *core = op_params->core;
+    if (dst_val_reg->size != core->analysis->bits &&
+        dst_val_reg->size != core->analysis->bits / 2) {
+      break;
+    }
+
+    RzRopSolverResult *result = op_params->result;
+    if (!is_pure_op(op)) {
+      return;
+    }
+    RzRopRegInfo *reg_info =
+        rz_core_rop_gadget_info_get_modified_register(gadget_info, dst_reg);
+
+    if (op->type) {
+    }
+    ab = rz_iterator_next(iter);
   }
   return;
 }
 
-static bool analysis_op_cb(void *user, const ut64 key, const void *v) {
-  const RopSolverAnalysisOpParams *op_params =
-      (RopSolverAnalysisOpParams *)user;
-  if (!op_params) {
-    return false;
+static void handle_analysis(RopSolverAnalysisOpParams *op_params) {
+  op_params->analysis_level++;
+  if (op_params->analysis_level > 2) {
+    return;
+  }
+  if (!op_params->result) {
+    return;
   }
 
-  if (!op_params->result) {
-    return false;
+  ut8 *buf = NULL;
+  if (!op_params->gadget_info->analysis_cache) {
+    buf = update_analysis_cache(op_params->core, op_params->gadget_info);
+    if (!buf) {
+      return;
+    }
   }
+
+  if (!op_params->result->graph) {
+    op_params->result->graph = init_rz_rop_graph();
+    if (!op_params->result->graph) {
+      return;
+    }
+  }
+
   const RzRopConstraint *constraint = op_params->constraint;
   switch (constraint->type) {
   case MOV_CONST:
-    handle_mov_const_analysis(op_params, v);
+    handle_mov_const_analysis(op_params);
   case MOV_REG:
-    handle_mov_reg_analysis(op_params, v);
+    handle_mov_reg_analysis(op_params);
     break;
   default:
     break;
   }
-  return true;
+  free(buf);
 }
 
 static bool has_value_cb(void *user, const void *key, const ut64 value) {
@@ -386,7 +576,7 @@ static void rz_solver_direct_lookup(const RzCore *core,
   }
 }
 
-static void mov_const(const RzCore *core, const RzRopGadgetInfo *gadget_info,
+static void mov_const(RzCore *core, RzRopGadgetInfo *gadget_info,
                       const RzRopConstraint *rop_constraint,
                       const RopSolverCallbackParams *callback_params) {
   // Assertions for mov_const solver
@@ -402,14 +592,14 @@ static void mov_const(const RzCore *core, const RzRopGadgetInfo *gadget_info,
   if (is_rop_solver_complete(callback_params->result)) {
     return;
   }
-  const RopSolverAnalysisOpParams analysis_op_params = {
-      .core = core,
-      .constraint = rop_constraint,
-      .gadget_info = gadget_info,
-      .result = callback_params->result};
+  RopSolverAnalysisOpParams analysis_op_params = {.core = core,
+                                                  .constraint = rop_constraint,
+                                                  .gadget_info = gadget_info,
+                                                  .result =
+                                                      callback_params->result,
+                                                  .analysis_level = 0};
 
-  ht_up_foreach(gadget_info->analysis_cache, analysis_op_cb,
-                (void *)&analysis_op_params);
+  handle_analysis(&analysis_op_params);
 
   // Recipe : Search for dependencies and create a z3 state
 }
@@ -436,9 +626,54 @@ static void mov_reg(const RzCore *core, const RzRopGadgetInfo *gadget_info,
   }
 }
 
+void prove(Z3_context ctx, Z3_solver s, Z3_ast f, bool is_valid) {
+  Z3_model m = 0;
+  Z3_ast not_f;
+  /* save the current state of the context */
+  Z3_solver_push(ctx, s);
+
+  not_f = Z3_mk_not(ctx, f);
+  Z3_solver_assert(ctx, s, not_f);
+
+  switch (Z3_solver_check(ctx, s)) {
+  case Z3_L_FALSE:
+    /* proved */
+    if (!is_valid) {
+      exit(0);
+    }
+    break;
+  case Z3_L_UNDEF:
+    m = Z3_solver_get_model(ctx, s);
+    if (m != 0) {
+      Z3_model_inc_ref(ctx, m);
+    }
+    if (is_valid) {
+      exit(0);
+    }
+    break;
+  case Z3_L_TRUE:
+    /* disproved */
+    m = Z3_solver_get_model(ctx, s);
+    if (m) {
+      Z3_model_inc_ref(ctx, m);
+      /* the model returned by Z3 is a counterexample */
+    }
+    if (is_valid) {
+      exit(0);
+    }
+    break;
+  }
+  if (m) {
+    Z3_model_dec_ref(ctx, m);
+  }
+
+  /* restore scope */
+  Z3_solver_pop(ctx, s, 1);
+}
+
 static void rop_gadget_info_constraint_find(
-    const RzCore *core, const RzRopConstraint *rop_constraint,
-    const RzRopGadgetInfo *gadget_info, const RopSolverCallbackParams *params) {
+    RzCore *core, const RzRopConstraint *rop_constraint,
+    RzRopGadgetInfo *gadget_info, const RopSolverCallbackParams *params) {
   rz_return_if_fail(params && params->constraints);
   if (is_rop_solver_complete(params->result)) {
     return;
@@ -455,9 +690,9 @@ static void rop_gadget_info_constraint_find(
 
 static bool rop_solver_cb(void *user, const ut64 k, const void *v) {
   const RopSolverCallbackParams *params = (RopSolverCallbackParams *)user;
-  const RzCore *core = params->core;
+  RzCore *core = params->core;
   const RzPVector *constraints = params->constraints;
-  const RzRopGadgetInfo *gadget_info = (RzRopGadgetInfo *)v;
+  RzRopGadgetInfo *gadget_info = (RzRopGadgetInfo *)v;
   // If rop solver is complete, bail out from here
   if (is_rop_solver_complete(params->result)) {
     return false;
@@ -520,7 +755,9 @@ RZ_OWN RZ_API RzRopSolverResult *rz_rop_solver_result_new(void) {
 
   result->is_solved = false;
   result->constraint_result = NULL;
+  result->graph = NULL;
   result->gadget_info_addr_set = rz_pvector_new(NULL);
+  result->rop_expressions = rz_pvector_new(NULL);
   result->ctx = rz_solver_mk_context();
   result->solver = rz_solver_mk_solver(result->ctx);
   return result;
@@ -530,10 +767,14 @@ RZ_OWN RZ_API RzRopSolverResult *rz_rop_solver_result_new(void) {
  * \brief Frees a RzRopSolverResult object.
  * \param result The RzRopSolverResult object to free.
  */
-RZ_API void rz_rop_solver_result_free(RzRopSolverResult *result) {
-  rz_return_if_fail(result);
+RZ_API void rz_rop_solver_result_free(RZ_NULLABLE RzRopSolverResult *result) {
+  if (!result) {
+    return;
+  }
   ht_pu_free(result->constraint_result);
   rz_pvector_free(result->gadget_info_addr_set);
+  rz_pvector_free(result->rop_expressions);
+  RZ_FREE(result->graph);
   del_solver(result->ctx, result->solver);
   del_context(result->ctx);
   RZ_FREE(result);

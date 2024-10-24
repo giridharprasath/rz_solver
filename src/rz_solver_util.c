@@ -44,7 +44,7 @@ RZ_API Z3_ast mk_int_var(const Z3_context ctx, const char *name) {
  * \param value Integer value
  * \return Z3_ast
  */
-RZ_API Z3_ast mk_int(const Z3_context ctx, const int value) {
+RZ_API Z3_ast mk_int(const Z3_context ctx, st64 value) {
   const Z3_sort ty = Z3_mk_int_sort(ctx);
   return Z3_mk_int(ctx, value, ty);
 }

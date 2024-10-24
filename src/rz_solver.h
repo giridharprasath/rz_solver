@@ -9,8 +9,30 @@
 #include <rz_core.h>
 #include <z3.h>
 
+#define MAX_GADGETS 10
+#define MAX_GADGET_NODE_NAME 20
+#define MAX_GADGET_NODE_RW 10
+
+typedef struct {
+  char name[MAX_GADGET_NODE_NAME];
+  char writes[MAX_GADGET_NODE_RW][MAX_GADGET_NODE_RW];
+  int writes_count;
+  char reads[MAX_GADGET_NODE_RW][MAX_GADGET_NODE_RW];
+  int reads_count;
+} RzRopGadgetNode;
+
+typedef struct {
+  int adj[MAX_GADGETS][MAX_GADGETS];
+  int num_vertices;
+  RzRopGadgetNode gadgets[MAX_GADGETS];
+} RzRopGraph;
+
+typedef struct rz_rop_constraint_t RzRopExpression;
+
 typedef struct rz_rop_solver_result_t {
   HtPU *constraint_result;
+  RzRopGraph *graph;
+  RzPVector /*<RzRopExpression *>*/ *rop_expressions;
   RzPVector /*<ut64>*/ *gadget_info_addr_set;
   bool is_solved;
   Z3_context ctx;

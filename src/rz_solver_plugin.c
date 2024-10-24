@@ -38,6 +38,12 @@ static const RzCmdDescHelp cmd_rop_solver_help = {
 RZ_IPI RzCmdStatus rz_cmd_rop_solver_handler(RzCore *core, int argc,
                                              const char **argv,
                                              RzCmdStateOutput *state) {
+  rz_return_val_if_fail(core && core->analysis, RZ_CMD_STATUS_ERROR);
+  if (!core->analysis->ht_rop_semantics) {
+    RZ_LOG_ERROR("ROP analysis not performed yet. Please run /Rg");
+    return RZ_CMD_STATUS_ERROR;
+  }
+
   RzPVector /*<RzRopConstraint *>*/ *constraints =
       rop_constraint_map_parse(core, argc, argv);
   if (!constraints) {
