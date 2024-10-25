@@ -75,23 +75,18 @@ static int add_gadget_to_graph(RzRopGraph *g, RzRopGadgetNode *gadget_node) {
   g->gadgets[index] = *gadget_node;
   g->num_vertices++;
 
-  // Update dependencies with existing gadgets
   for (int i = 0; i < g->num_vertices - 1; i++) {
-    // Check if the new gadget writes to registers read by existing gadgets
     for (int w = 0; w < gadget_node->writes_count; w++) {
       for (int r = 0; r < g->gadgets[i].reads_count; r++) {
         if (strcmp(gadget_node->writes[w], g->gadgets[i].reads[r]) == 0) {
-          // Add edge from new gadget to existing gadget (index -> i)
           g->adj[index][i] = 1;
         }
       }
     }
 
-    // Check if existing gadgets write to registers read by the new gadget
     for (int w = 0; w < g->gadgets[i].writes_count; w++) {
       for (int r = 0; r < gadget_node->reads_count; r++) {
         if (strcmp(g->gadgets[i].writes[w], gadget_node->reads[r]) == 0) {
-          // Add edge from existing gadget to new gadget (i -> index)
           g->adj[i][index] = 1;
         }
       }
@@ -124,7 +119,6 @@ bool topological_sort(RzRopGraph *g, int sorted_order[]) {
   int in_degree[MAX_GADGETS] = {0};
   int num_vertices = g->num_vertices;
 
-  // Calculate in-degrees of all vertices
   for (int i = 0; i < num_vertices; i++) {
     for (int j = 0; j < num_vertices; j++) {
       if (g->adj[j][i]) {
@@ -134,9 +128,8 @@ bool topological_sort(RzRopGraph *g, int sorted_order[]) {
   }
 
   int queue[MAX_GADGETS], front = 0, rear = -1;
-  int index = 0; // Index for sorted_order
+  int index = 0;
 
-  // Enqueue all vertices with in-degree 0
   for (int i = 0; i < num_vertices; i++) {
     if (in_degree[i] == 0) {
       queue[++rear] = i;
@@ -159,7 +152,6 @@ bool topological_sort(RzRopGraph *g, int sorted_order[]) {
   }
 
   if (index != num_vertices) {
-    // Graph has a cycle; topological sort not possible
     return false;
   }
 
@@ -195,7 +187,6 @@ static void *fill_gadget_analysis(RzRopConstraint *constraint, RzRopGadgetNode *
 
   switch (constraint->type) {
   case MOV_CONST: {
-    // reg <- const (SRC_CONST -> DST_REG)
     strcpy(gadget_node->writes[gadget_node->writes_count++],
            constraint->args[DST_REG]);
     break;
@@ -208,7 +199,6 @@ static void *fill_gadget_analysis(RzRopConstraint *constraint, RzRopGadgetNode *
     break;
   }
   case MOV_OP_CONST: {
-    // reg <- reg OP const (SRC_REG -> DST_REG with operation and constant)
     strcpy(gadget_node->writes[gadget_node->writes_count++],
            constraint->args[DST_REG]);
     strcpy(gadget_node->reads[gadget_node->reads_count++],
@@ -216,7 +206,6 @@ static void *fill_gadget_analysis(RzRopConstraint *constraint, RzRopGadgetNode *
     break;
   }
   case MOV_OP_REG: {
-    // reg <- reg OP reg (SRC_REG -> DST_REG with operation and another reg)
     strcpy(gadget_node->writes[gadget_node->writes_count++],
            constraint->args[DST_REG]);
     strcpy(gadget_node->reads[gadget_node->reads_count++],
